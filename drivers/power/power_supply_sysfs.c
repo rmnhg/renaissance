@@ -185,6 +185,12 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(scope),
 	POWER_SUPPLY_ATTR(system_temp_level),
 	POWER_SUPPLY_ATTR(resistance),
+#ifdef CONFIG_SONY_FLAMINGO
+	POWER_SUPPLY_ATTR(temp_cold),
+	POWER_SUPPLY_ATTR(temp_hot),
+	POWER_SUPPLY_ATTR(is_during_call),
+	POWER_SUPPLY_ATTR(is_maintain),
+#endif
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_ATTR(model_name),
 	POWER_SUPPLY_ATTR(manufacturer),
@@ -310,6 +316,14 @@ int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env)
 		}
 
 		dev_dbg(dev, "prop %s=%s\n", attrname, prop_buf);
+
+#ifdef CONFIG_SONY_FLAMINGO
+		if ((env->envp_idx+1) >= UEVENT_NUM_ENVP) {
+			kfree(attrname);
+			ret = 0;
+			goto out;	
+		}
+#endif
 
 		ret = add_uevent_var(env, "POWER_SUPPLY_%s=%s", attrname, prop_buf);
 		kfree(attrname);

@@ -224,6 +224,13 @@
 #define BOOST_FLASH_WA			BIT(1)
 #define POWER_STAGE_WA			BIT(2)
 
+/*[Arima5911][35216][bozhi_lin] battery temp over hot or under cold to disable charging until plug out cable 20140324 begin*/
+#ifdef CONFIG_SONY_FLAMINGO
+#define OVER_UNDER_TEMP_TIMES	3
+#define MAINTAIN_CHECK_PERIOD_MS	600000
+#define MAINTAIN_CAPACITY 100
+#endif
+
 struct qpnp_chg_irq {
 	int		irq;
 	unsigned long		disabled;
@@ -311,6 +318,10 @@ struct qpnp_chg_chip {
 	struct qpnp_chg_irq		coarse_det_usb;
 	bool				bat_is_cool;
 	bool				bat_is_warm;
+#ifdef CONFIG_SONY_FLAMINGO
+	bool				bat_is_cold;
+	bool				bat_is_hot;
+#endif
 	bool				chg_done;
 	bool				charger_monitor_checked;
 	bool				usb_present;
@@ -329,6 +340,10 @@ struct qpnp_chg_chip {
 	bool				use_external_rsense;
 	bool				fastchg_on;
 	bool				parallel_ovp_mode;
+#ifdef CONFIG_SONY_FLAMINGO
+	bool				charging_timer_enable;
+	bool				chg_failed_flag;
+#endif
 	unsigned int			bpd_detection;
 	unsigned int			max_bat_chg_current;
 	unsigned int			warm_bat_chg_ma;
@@ -355,11 +370,19 @@ struct qpnp_chg_chip {
 	unsigned int			cold_batt_p;
 	int				warm_bat_decidegc;
 	int				cool_bat_decidegc;
+#ifdef CONFIG_SONY_FLAMINGO
+	int				hot_bat_decidegc;
+	int				cold_bat_decidegc;
+#endif
 	int				fake_battery_soc;
 	unsigned int			safe_current;
 	unsigned int			revision;
 	unsigned int			type;
 	unsigned int			tchg_mins;
+#ifdef CONFIG_SONY_FLAMINGO
+	unsigned int			usb_tchg_mins;
+	unsigned int			ac_tchg_mins;
+#endif	
 	unsigned int			thermal_levels;
 	unsigned int			therm_lvl_sel;
 	unsigned int			*thermal_mitigation;
@@ -396,6 +419,21 @@ struct qpnp_chg_chip {
 	bool				ext_ovp_ic_gpio_enabled;
 	unsigned int			ext_ovp_isns_gpio;
 	unsigned int			usb_trim_default;
+#ifdef CONFIG_SONY_FLAMINGO
+	bool				is_during_call;
+	unsigned int		call_bat_mv;
+	int over_hot_count;
+	int under_cold_count;
+	struct delayed_work		charging_maintenance_work;
+	unsigned int		maintenance_count;
+	unsigned int		first_maintain_mins;
+	unsigned int		second_maintain_mins;
+	unsigned int		first_maintain_mv;
+	unsigned int		second_maintain_mv;
+	bool				is_maintain_start;
+	bool				is_first_maintain;
+	bool				is_second_maintain;
+#endif
 };
 
 static void
@@ -438,6 +476,11 @@ enum usbin_health {
 	USBIN_OVP,
 };
 
+#ifdef CONFIG_SONY_FLAMINGO
+static int qpnp_chg_tchg_max_set(struct qpnp_chg_chip *chip, int minutes);
+static int get_prop_battery_voltage_now(struct qpnp_chg_chip *chip);
+static int qpnp_chg_tchg_max_enable(struct qpnp_chg_chip *chip, bool enable);
+#endif
 static int ext_ovp_isns_present;
 module_param(ext_ovp_isns_present, int, 0444);
 static int ext_ovp_isns_r;
@@ -512,6 +555,7 @@ static struct kernel_param_ops ext_ovp_en_ops = {
 };
 module_param_cb(ext_ovp_isns_online, &ext_ovp_en_ops,
 		&ext_ovp_isns_online, 0664);
+
 
 static inline int
 get_bpd(const char *name)
@@ -1220,8 +1264,14 @@ qpnp_chg_force_run_on_batt(struct qpnp_chg_chip *chip, int disable)
 	if (chip->use_default_batt_values)
 		return 0;
 	/* Don't force on battery if battery is not present */
+#ifdef CONFIG_SONY_FLAMINGO
+	if (!qpnp_chg_is_batt_present(chip))
+		return qpnp_chg_masked_write(chip, chip->chgr_base + CHGR_CHG_CTRL,
+			CHGR_ON_BAT_FORCE_BIT, CHGR_ON_BAT_FORCE_BIT, 1);
+#else
 	if (!qpnp_chg_is_batt_present(chip))
 		return 0;
+#endif
 
 	/* This bit forces the charger to run off of the battery rather
 	 * than a connected charger */
@@ -1306,12 +1356,27 @@ qpnp_chg_vbatdet_set(struct qpnp_chg_chip *chip, int vbatdet_mv)
 static void
 qpnp_chg_set_appropriate_vbatdet(struct qpnp_chg_chip *chip)
 {
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->bat_is_cold)
+		qpnp_chg_vbatdet_set(chip, chip->cool_bat_mv
+			- chip->resume_delta_mv);
+	else if (chip->bat_is_warm)
+		qpnp_chg_vbatdet_set(chip, chip->warm_bat_mv
+			- chip->resume_delta_mv);
+	else if (chip->bat_is_hot)
+		qpnp_chg_vbatdet_set(chip, chip->warm_bat_mv
+			- chip->resume_delta_mv);
+	else if (chip->is_during_call)
+		qpnp_chg_vbatdet_set(chip, chip->call_bat_mv 
+			- chip->resume_delta_mv);
+#else
 	if (chip->bat_is_cool)
 		qpnp_chg_vbatdet_set(chip, chip->cool_bat_mv
 			- chip->resume_delta_mv);
 	else if (chip->bat_is_warm)
 		qpnp_chg_vbatdet_set(chip, chip->warm_bat_mv
 			- chip->resume_delta_mv);
+#endif
 	else if (chip->resuming_charging)
 		qpnp_chg_vbatdet_set(chip, chip->max_voltage_mv
 			+ chip->resume_delta_mv);
@@ -1529,7 +1594,16 @@ qpnp_chg_vddmax_and_trim_set(struct qpnp_chg_chip *chip,
 	trim_set = clamp((int)chip->trim_center
 			+ (trim_mv / QPNP_CHG_BUCK_TRIM1_STEP),
 			0, 0xF);
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->is_first_maintain)
+		trim = 0x20;
+	else if (chip->is_second_maintain)
+		trim = 0x10;
+	else 
+		trim = (u8)trim_set << 4;
+#else	
 	trim = (u8)trim_set << 4;
+#endif
 	rc = qpnp_chg_masked_write(chip,
 		chip->buck_base + BUCK_CTRL_TRIM1,
 		QPNP_CHG_BUCK_VDD_TRIM_MASK,
@@ -1562,12 +1636,33 @@ qpnp_chg_vddmax_get(struct qpnp_chg_chip *chip)
 static void
 qpnp_chg_set_appropriate_vddmax(struct qpnp_chg_chip *chip)
 {
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->bat_is_cold)
+		qpnp_chg_vddmax_and_trim_set(chip, chip->cool_bat_mv,
+				chip->delta_vddmax_mv);
+	else if (chip->bat_is_warm)
+		qpnp_chg_vddmax_and_trim_set(chip, chip->warm_bat_mv,
+				chip->delta_vddmax_mv);
+	else if (chip->bat_is_hot)
+		qpnp_chg_vddmax_and_trim_set(chip, chip->warm_bat_mv,
+				chip->delta_vddmax_mv);
+	else if (chip->is_during_call)
+		qpnp_chg_vddmax_and_trim_set(chip, chip->call_bat_mv, 
+				chip->delta_vddmax_mv);
+	else if (chip->is_first_maintain)
+		qpnp_chg_vddmax_and_trim_set(chip, chip->first_maintain_mv,
+				chip->delta_vddmax_mv);
+	else if (chip->is_second_maintain)
+		qpnp_chg_vddmax_and_trim_set(chip, chip->second_maintain_mv,
+				chip->delta_vddmax_mv);
+#else
 	if (chip->bat_is_cool)
 		qpnp_chg_vddmax_and_trim_set(chip, chip->cool_bat_mv,
 				chip->delta_vddmax_mv);
 	else if (chip->bat_is_warm)
 		qpnp_chg_vddmax_and_trim_set(chip, chip->warm_bat_mv,
 				chip->delta_vddmax_mv);
+#endif
 	else
 		qpnp_chg_vddmax_and_trim_set(chip, chip->max_voltage_mv,
 				chip->delta_vddmax_mv);
@@ -1688,6 +1783,9 @@ qpnp_chg_regulator_batfet_set(struct qpnp_chg_chip *chip, bool enable)
 	return rc;
 }
 
+#ifdef CONFIG_SONY_FLAMINGO
+#define CHGR_CHG_FAILED_BIT	BIT(7)
+#endif
 #define USB_WALL_THRESHOLD_MA	500
 #define ENUM_T_STOP_BIT		BIT(0)
 #define USB_5V_UV	5000000
@@ -1698,11 +1796,37 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 	struct qpnp_chg_chip *chip = _chip;
 	int usb_present, host_mode, usbin_health;
 	u8 psy_health_sts;
+#ifdef CONFIG_SONY_FLAMINGO
+	int rc = 0;
+#endif
 
 	usb_present = qpnp_chg_is_usb_chg_plugged_in(chip);
 	host_mode = qpnp_chg_is_otg_en_set(chip);
 	pr_debug("usbin-valid triggered: %d host_mode: %d\n",
 		usb_present, host_mode);
+
+#ifdef CONFIG_SONY_FLAMINGO
+	if(chip->charging_timer_enable) {
+		if(chip->chg_failed_flag && !usb_present){
+			pr_debug("clear charge failed flag\n");
+			rc = qpnp_chg_masked_write(chip,
+			chip->chgr_base + CHGR_CHG_FAILED,
+			CHGR_CHG_FAILED_BIT,
+			CHGR_CHG_FAILED_BIT, 1);
+			if (rc)
+				pr_err("Failed to write chg_fail clear bit!\n");
+			chip->chg_failed_flag = 0;
+		}
+	}
+#endif
+
+#ifdef CONFIG_SONY_FLAMINGO
+	if (!usb_present) {
+		chip->over_hot_count = 0;
+		chip->under_cold_count = 0;
+		qpnp_chg_set_appropriate_battery_current(chip);
+	}
+#endif
 
 	/* In host mode notifications cmoe from USB supply */
 	if (host_mode)
@@ -1773,10 +1897,16 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 			}
 			schedule_delayed_work(&chip->eoc_work,
 				msecs_to_jiffies(EOC_CHECK_PERIOD_MS));
+#ifdef CONFIG_SONY_FLAMINGO
+			pm_stay_awake(chip->dev);
+#endif
 			schedule_work(&chip->soc_check_work);
 		}
 
 		power_supply_set_present(chip->usb_psy, chip->usb_present);
+#ifdef CONFIG_SONY_FLAMINGO
+		power_supply_set_online(chip->usb_psy, chip->usb_present);
+#endif
 		schedule_work(&chip->batfet_lcl_work);
 	}
 
@@ -1945,7 +2075,6 @@ qpnp_chg_dc_dcin_valid_irq_handler(int irq, void *_chip)
 	return IRQ_HANDLED;
 }
 
-#define CHGR_CHG_FAILED_BIT	BIT(7)
 static irqreturn_t
 qpnp_chg_chgr_chg_failed_irq_handler(int irq, void *_chip)
 {
@@ -1954,12 +2083,26 @@ qpnp_chg_chgr_chg_failed_irq_handler(int irq, void *_chip)
 
 	pr_debug("chg_failed triggered\n");
 
+#ifdef CONFIG_SONY_FLAMINGO
+	if(chip->charging_timer_enable) {
+		chip->chg_failed_flag = 1;
+	}
+	else {
+		rc = qpnp_chg_masked_write(chip,
+			chip->chgr_base + CHGR_CHG_FAILED,
+			CHGR_CHG_FAILED_BIT,
+			CHGR_CHG_FAILED_BIT, 1);
+		if (rc)
+			pr_err("Failed to write chg_fail clear bit!\n");
+	}
+#else
 	rc = qpnp_chg_masked_write(chip,
 		chip->chgr_base + CHGR_CHG_FAILED,
 		CHGR_CHG_FAILED_BIT,
 		CHGR_CHG_FAILED_BIT, 1);
 	if (rc)
 		pr_err("Failed to write chg_fail clear bit!\n");
+#endif
 
 	if (chip->bat_if_base) {
 		pr_debug("psy changed batt_psy\n");
@@ -2122,6 +2265,12 @@ qpnp_batt_property_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_COOL_TEMP:
 	case POWER_SUPPLY_PROP_WARM_TEMP:
 	case POWER_SUPPLY_PROP_CAPACITY:
+#ifdef CONFIG_SONY_FLAMINGO
+	case POWER_SUPPLY_PROP_COLD_TEMP:
+	case POWER_SUPPLY_PROP_HOT_TEMP:
+	case POWER_SUPPLY_PROP_IS_DURING_CALL:
+	case POWER_SUPPLY_PROP_IS_MAINTAIN:
+#endif	
 		return 1;
 	default:
 		break;
@@ -2293,6 +2442,12 @@ static enum power_supply_property msm_batt_power_props[] = {
 	POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_VOLTAGE_OCV,
+#ifdef CONFIG_SONY_FLAMINGO
+	POWER_SUPPLY_PROP_COLD_TEMP,
+	POWER_SUPPLY_PROP_HOT_TEMP,
+	POWER_SUPPLY_PROP_IS_DURING_CALL,
+	POWER_SUPPLY_PROP_IS_MAINTAIN,
+#endif
 };
 
 static char *pm_power_supplied_to[] = {
@@ -2357,6 +2512,74 @@ qpnp_aicl_check_work(struct work_struct *work)
 	}
 	chip->charger_monitor_checked = true;
 }
+
+#ifdef CONFIG_SONY_FLAMINGO
+static void
+qpnp_charging_maintenance_work(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct qpnp_chg_chip *chip = container_of(dwork,
+				struct qpnp_chg_chip, charging_maintenance_work);
+				
+	unsigned int first_maintain_count = (chip->first_maintain_mins) * 60 / (MAINTAIN_CHECK_PERIOD_MS / 1000);
+	unsigned int second_maintain_count = (chip->first_maintain_mins + chip->second_maintain_mins) * 60 / (MAINTAIN_CHECK_PERIOD_MS / 1000);
+
+	pr_info("chip->is_maintain_start=%d\n", chip->is_maintain_start);
+	pr_info("chip->is_first_maintain=%d, chip->is_second_maintain=%d\n", chip->is_first_maintain, chip->is_second_maintain);
+
+	if (chip->is_maintain_start) {
+		qpnp_chg_tchg_max_enable(chip, false);
+		
+		pr_info("chip->first_maintain_mv=%d, chip->second_maintain_mv=%d\n", chip->first_maintain_mv, chip->second_maintain_mv);
+		
+		chip->maintenance_count++;
+		if ((chip->maintenance_count) == 1) {
+			pm_stay_awake(chip->dev);
+			chip->is_first_maintain = true;
+			chip->is_second_maintain = false;
+			qpnp_chg_set_appropriate_vddmax(chip);
+
+		}
+		else if ((chip->maintenance_count) <= first_maintain_count) {
+			chip->is_first_maintain = true;
+			chip->is_second_maintain = false;
+			qpnp_chg_set_appropriate_vddmax(chip);
+		}
+		else if (chip->maintenance_count <= second_maintain_count) {
+			chip->is_first_maintain = false;
+			chip->is_second_maintain = true;
+			qpnp_chg_set_appropriate_vddmax(chip);
+		}
+		else {
+			chip->maintenance_count = 0;
+			chip->is_maintain_start = false;
+			chip->is_first_maintain = false;
+			chip->is_second_maintain = false;
+		}
+			
+		pr_info("chip->maintenance_count=%d, first_maintain_count=%d, second_maintain_count=%d\n", chip->maintenance_count, first_maintain_count, second_maintain_count);
+
+		schedule_delayed_work(&chip->charging_maintenance_work,
+			msecs_to_jiffies(MAINTAIN_CHECK_PERIOD_MS));
+	}
+	else {
+		qpnp_chg_tchg_max_set(chip, chip->tchg_mins);
+		
+		chip->maintenance_count = 0;
+		chip->is_maintain_start = false;
+		chip->is_first_maintain = false;
+		chip->is_second_maintain = false;
+		
+		qpnp_chg_set_appropriate_vddmax(chip);
+		qpnp_chg_set_appropriate_battery_current(chip);
+		qpnp_chg_set_appropriate_vbatdet(chip);
+		
+		schedule_delayed_work(&chip->eoc_work,
+			msecs_to_jiffies(EOC_CHECK_PERIOD_MS));
+		pm_stay_awake(chip->dev);
+	}
+}
+#endif
 
 static int
 get_prop_battery_voltage_now(struct qpnp_chg_chip *chip)
@@ -2453,7 +2676,16 @@ get_batt_capacity(struct qpnp_chg_chip *chip)
 	if (chip->bms_psy) {
 		chip->bms_psy->get_property(chip->bms_psy,
 				POWER_SUPPLY_PROP_CAPACITY, &ret);
+#ifdef CONFIG_SONY_FLAMINGO
+		if (chip->is_maintain_start) {
+			return MAINTAIN_CAPACITY;
+		}
+		else {
+			return ret.intval;
+		}
+#else
 		return ret.intval;
+#endif
 	}
 	return DEFAULT_CAPACITY;
 }
@@ -2464,10 +2696,18 @@ get_prop_batt_status(struct qpnp_chg_chip *chip)
 	int rc;
 	u8 chgr_sts, bat_if_sts;
 
+#ifdef CONFIG_SONY_FLAMINGO
+	if ((qpnp_chg_is_usb_chg_plugged_in(chip) ||
+		qpnp_chg_is_dc_chg_plugged_in(chip)) 
+			&& get_batt_capacity(chip) == 100) {
+		return POWER_SUPPLY_STATUS_FULL;
+	}   
+#else
 	if ((qpnp_chg_is_usb_chg_plugged_in(chip) ||
 		qpnp_chg_is_dc_chg_plugged_in(chip)) && chip->chg_done) {
 		return POWER_SUPPLY_STATUS_FULL;
 	}
+#endif
 
 	rc = qpnp_chg_read(chip, &chgr_sts, INT_RT_STS(chip->chgr_base), 1);
 	if (rc) {
@@ -2485,6 +2725,15 @@ get_prop_batt_status(struct qpnp_chg_chip *chip)
 		return POWER_SUPPLY_STATUS_CHARGING;
 	if (chgr_sts & FAST_CHG_ON_IRQ && bat_if_sts & BAT_FET_ON_IRQ)
 		return POWER_SUPPLY_STATUS_CHARGING;
+	
+#ifdef CONFIG_SONY_FLAMINGO
+	if ((qpnp_chg_is_usb_chg_plugged_in(chip) ||
+		qpnp_chg_is_dc_chg_plugged_in(chip))
+			&& (get_batt_capacity(chip) >= 0)
+			&& !qpnp_chg_is_otg_en_set(chip)) {
+		return POWER_SUPPLY_STATUS_CHARGING;
+	}
+#else	
 
 	/* report full if state of charge is 100 and a charger is connected */
 	if ((qpnp_chg_is_usb_chg_plugged_in(chip) ||
@@ -2492,6 +2741,7 @@ get_prop_batt_status(struct qpnp_chg_chip *chip)
 			&& get_batt_capacity(chip) == 100) {
 		return POWER_SUPPLY_STATUS_FULL;
 	}
+#endif	
 
 	return POWER_SUPPLY_STATUS_DISCHARGING;
 }
@@ -2572,6 +2822,10 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 				&& charger_in
 				&& !chip->bat_is_cool
 				&& !chip->bat_is_warm
+#ifdef CONFIG_SONY_FLAMINGO
+				&& !chip->bat_is_cold
+				&& !chip->bat_is_hot
+#endif
 				&& !chip->resuming_charging
 				&& !chip->charging_disabled
 				&& chip->soc_resume_limit
@@ -2587,7 +2841,16 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 				&& !qpnp_chg_is_usb_chg_plugged_in(chip))
 				pr_warn_ratelimited("Battery 0, CHG absent\n");
 		}
+#ifdef CONFIG_SONY_FLAMINGO
+		if (chip->is_maintain_start) {
+			return MAINTAIN_CAPACITY;
+		}
+		else {
+			return soc;
+		}
+#else
 		return soc;
+#endif
 	} else {
 		pr_debug("No BMS supply registered return 50\n");
 	}
@@ -2718,7 +2981,38 @@ qpnp_batt_external_power_changed(struct power_supply *psy)
 				schedule_work(&chip->reduce_power_stage_work);
 			}
 		}
+
+#ifdef CONFIG_SONY_FLAMINGO
+		chip->usb_psy->get_property(chip->usb_psy, POWER_SUPPLY_PROP_TYPE, &ret);
+		switch(ret.intval) {
+			case POWER_SUPPLY_TYPE_USB_DCP:
+			case POWER_SUPPLY_TYPE_USB_CDP:
+				pr_debug("usb type: USB_DCP, set timer=%d\n", chip->ac_tchg_mins);
+				chip->tchg_mins = chip->ac_tchg_mins;
+				qpnp_chg_tchg_max_set(chip, chip->tchg_mins);
+				break;
+			case POWER_SUPPLY_TYPE_USB:
+			case POWER_SUPPLY_TYPE_USB_ACA:
+				pr_debug("usb type: %d, set timer=%d\n", ret.intval, chip->usb_tchg_mins);
+				chip->tchg_mins = chip->usb_tchg_mins;
+				qpnp_chg_tchg_max_set(chip, chip->tchg_mins);
+				break;
+			default:
+				pr_debug("usb type: %d, not set timer\n", ret.intval);
+		}
+#endif
 	}
+#ifdef CONFIG_SONY_FLAMINGO
+	else {
+		if (chip->is_maintain_start) {
+			chip->maintenance_count = 0;
+			chip->is_maintain_start = false;
+			chip->is_first_maintain = false;
+			chip->is_second_maintain = false;
+			flush_delayed_work_sync(&chip->charging_maintenance_work);
+		}
+	}
+#endif
 
 skip_set_iusb_max:
 	pr_debug("end of power supply changed\n");
@@ -2771,6 +3065,14 @@ qpnp_batt_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_WARM_TEMP:
 		val->intval = chip->warm_bat_decidegc;
 		break;
+#ifdef CONFIG_SONY_FLAMINGO
+	case POWER_SUPPLY_PROP_COLD_TEMP:
+		val->intval = chip->cold_bat_decidegc;
+		break;
+	case POWER_SUPPLY_PROP_HOT_TEMP:
+		val->intval = chip->hot_bat_decidegc;
+		break;
+#endif
 	case POWER_SUPPLY_PROP_CAPACITY:
 		val->intval = get_prop_capacity(chip);
 		break;
@@ -2810,6 +3112,14 @@ qpnp_batt_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = get_prop_online(chip);
 		break;
+#ifdef CONFIG_SONY_FLAMINGO
+	case POWER_SUPPLY_PROP_IS_DURING_CALL:
+		val->intval = chip->is_during_call;
+		break;
+	case POWER_SUPPLY_PROP_IS_MAINTAIN:
+		val->intval = chip->is_maintain_start;
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -2933,10 +3243,43 @@ qpnp_chg_ibatmax_get(struct qpnp_chg_chip *chip, int *chg_current)
 #define QPNP_CHG_TCHG_MIN	4
 #define QPNP_CHG_TCHG_MAX	512
 #define QPNP_CHG_TCHG_STEP	4
+#ifdef CONFIG_SONY_FLAMINGO
+static int qpnp_chg_tchg_max_enable(struct qpnp_chg_chip *chip, bool enable)
+{
+	int rc;
+
+	if (enable) {
+		rc = qpnp_chg_masked_write(chip, chip->chgr_base + CHGR_TCHG_MAX_EN,
+				QPNP_CHG_TCHG_EN_MASK, QPNP_CHG_TCHG_EN_MASK, 1);
+		if (rc) {
+			pr_err("failed write tchg_max_en rc=%d\n", rc);
+			return rc;
+		}
+	}
+	else {
+		rc = qpnp_chg_masked_write(chip, chip->chgr_base + CHGR_TCHG_MAX_EN,
+				QPNP_CHG_TCHG_EN_MASK, 0, 1);
+		if (rc) {
+			pr_err("failed write tchg_max_en rc=%d\n", rc);
+			return rc;
+		}
+	}
+
+	return 0;
+}
+#endif
+
 static int qpnp_chg_tchg_max_set(struct qpnp_chg_chip *chip, int minutes)
 {
 	u8 temp;
 	int rc;
+
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->bat_is_cold || chip->bat_is_warm || chip->bat_is_hot)
+		return 0;
+	else if (chip->is_during_call)
+		return 0;
+#endif
 
 	if (minutes < QPNP_CHG_TCHG_MIN || minutes > QPNP_CHG_TCHG_MAX) {
 		pr_err("bad max minutes =%d asked to set\n", minutes);
@@ -2983,6 +3326,21 @@ qpnp_chg_set_appropriate_battery_current(struct qpnp_chg_chip *chip)
 	if (chip->therm_lvl_sel != 0 && chip->thermal_mitigation)
 		chg_current = min(chg_current,
 			chip->thermal_mitigation[chip->therm_lvl_sel]);
+
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->bat_is_cold || chip->bat_is_hot) {
+		chip->charging_disabled = true;
+		qpnp_chg_charge_en(chip, 0);
+		qpnp_chg_force_run_on_batt(chip, 1);
+	}
+	else {
+		if ((chip->over_hot_count < OVER_UNDER_TEMP_TIMES) && (chip->under_cold_count < OVER_UNDER_TEMP_TIMES)) {
+			chip->charging_disabled = false;
+			qpnp_chg_force_run_on_batt(chip, 0);
+			qpnp_chg_charge_en(chip, 1);
+		}
+	}
+#endif
 
 	pr_debug("setting %d mA\n", chg_current);
 	qpnp_chg_ibatmax_set(chip, chg_current);
@@ -3555,6 +3913,9 @@ qpnp_chg_adjust_vddmax(struct qpnp_chg_chip *chip, int vbat_mv)
 
 #define CONSECUTIVE_COUNT	3
 #define VBATDET_MAX_ERR_MV	50
+#ifdef CONFIG_SONY_FLAMINGO
+#define MAINTAIN_CHECK_COUNT	10
+#endif
 static void
 qpnp_eoc_work(struct work_struct *work)
 {
@@ -3566,6 +3927,10 @@ qpnp_eoc_work(struct work_struct *work)
 	int ibat_ma, vbat_mv, rc = 0;
 	u8 batt_sts = 0, buck_sts = 0, chg_sts = 0;
 	bool vbat_lower_than_vbatdet;
+#ifdef CONFIG_SONY_FLAMINGO
+	static int count_maintain_check;
+	static int count_retry_charging;
+#endif
 
 	pm_stay_awake(chip->dev);
 	qpnp_chg_charge_en(chip, !chip->charging_disabled);
@@ -3629,6 +3994,20 @@ qpnp_eoc_work(struct work_struct *work)
 		if (buck_sts & VDD_LOOP_IRQ)
 			qpnp_chg_adjust_vddmax(chip, vbat_mv);
 
+#ifdef CONFIG_SONY_FLAMINGO
+		if (!(buck_sts & VDD_LOOP_IRQ)) {
+			pr_debug("Not in CV\n");
+			count = 0;
+			count_maintain_check =0;
+		} else if ((ibat_ma * -1) > chip->term_current) {
+			pr_debug("Not at EOC, battery current too high\n");
+			count = 0;
+			count_maintain_check =0;
+		} else if ((ibat_ma > 0) && (count_maintain_check <= MAINTAIN_CHECK_COUNT)) {
+			pr_debug("Charging but system demand increased, count_maintain_check=%d\n", count_maintain_check);
+			count = 0;
+			count_maintain_check += 1;
+#else
 		if (!(buck_sts & VDD_LOOP_IRQ)) {
 			pr_debug("Not in CV\n");
 			count = 0;
@@ -3638,19 +4017,40 @@ qpnp_eoc_work(struct work_struct *work)
 		} else if (ibat_ma > 0) {
 			pr_debug("Charging but system demand increased\n");
 			count = 0;
+#endif
 		} else {
 			if (count == CONSECUTIVE_COUNT) {
+#ifdef CONFIG_SONY_FLAMINGO
+				if (!chip->bat_is_cool && !chip->bat_is_warm &&
+					!chip->bat_is_cold && !chip->bat_is_hot) {
+#else
 				if (!chip->bat_is_cool && !chip->bat_is_warm) {
+#endif
 					pr_info("End of Charging\n");
 					chip->chg_done = true;
 				} else {
+#ifdef CONFIG_SONY_FLAMINGO
+					pr_info("stop charging: battery is cold=%d, cool=%d, warm=%d, hot=%d, vddmax = %d reached\n",
+						chip->bat_is_cold, chip->bat_is_cool, chip->bat_is_warm, chip->bat_is_hot,
+						qpnp_chg_vddmax_get(chip));
+#else						
 					pr_info("stop charging: battery is %s, vddmax = %d reached\n",
 						chip->bat_is_cool
 							? "cool" : "warm",
 						qpnp_chg_vddmax_get(chip));
+#endif
 				}
 				chip->delta_vddmax_mv = 0;
 				qpnp_chg_set_appropriate_vddmax(chip);
+#ifdef CONFIG_SONY_FLAMINGO
+				pr_debug("psy changed batt_psy\n");
+				power_supply_changed(&chip->batt_psy);
+				chip->is_maintain_start = true;
+				if (chip->is_maintain_start) {
+						schedule_delayed_work(&chip->charging_maintenance_work,
+							0 /*msecs_to_jiffies(MAINTAIN_CHECK_PERIOD_MS)*/);
+				}
+#else
 				qpnp_chg_charge_en(chip, 0);
 				/* sleep for a second before enabling */
 				msleep(2000);
@@ -3659,14 +4059,47 @@ qpnp_eoc_work(struct work_struct *work)
 				pr_debug("psy changed batt_psy\n");
 				power_supply_changed(&chip->batt_psy);
 				qpnp_chg_enable_irq(&chip->chg_vbatdet_lo);
+#endif	
 				goto stop_eoc;
 			} else {
+#ifdef CONFIG_SONY_FLAMINGO
+				if (chip->bat_is_cold || chip->bat_is_warm || chip->bat_is_hot)
+					count = 0;
+				else if (chip->is_during_call)
+					count = 0;
+				else if (chip->is_maintain_start)
+					count = 0;
+				else
+					count += 1;
+#else					
 				count += 1;
+#endif
 				pr_debug("EOC count = %d\n", count);
 			}
 		}
 	} else {
 		pr_debug("not charging\n");
+#ifdef CONFIG_SONY_FLAMINGO
+   || (CONFIG_BSP_HW_V_CURRENT >= CONFIG_BSP_HW_V_8926SS_PDP2) && defined(CONFIG_BSP_HW_SKU_8926SS) )
+		count_retry_charging++;
+		if (count_retry_charging < CONSECUTIVE_COUNT) {
+			if (qpnp_chg_is_usb_chg_plugged_in(chip) || qpnp_chg_is_dc_chg_plugged_in(chip)) {
+				pr_debug("charger in, check again later\n");
+			
+				/* disable charging */
+				qpnp_chg_charge_en(chip, 0);
+				qpnp_chg_force_run_on_batt(chip, 1);
+			
+				msleep(2000);
+			
+				/* enable charging */
+				qpnp_chg_force_run_on_batt(chip, 0);
+				qpnp_chg_charge_en(chip, 1);
+			
+				goto check_again_later;
+			}
+		}
+#endif
 		goto stop_eoc;
 	}
 
@@ -3678,7 +4111,16 @@ check_again_later:
 stop_eoc:
 	vbat_low_count = 0;
 	count = 0;
+#ifdef CONFIG_SONY_FLAMINGO
+	count_retry_charging = 0;
+	if (chip->is_maintain_start) {
+	}
+	else {
+		pm_relax(chip->dev);
+	}
+#else
 	pm_relax(chip->dev);
+#endif
 }
 
 static void
@@ -3722,6 +4164,9 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 {
 	struct qpnp_chg_chip *chip = ctx;
 	bool bat_warm = 0, bat_cool = 0;
+#ifdef CONFIG_SONY_FLAMINGO
+	bool bat_hot = 0, bat_cold = 0;
+#endif
 	int temp;
 
 	if (state >= ADC_TM_STATE_NUM) {
@@ -3734,6 +4179,103 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 	pr_debug("temp = %d state = %s\n", temp,
 			state == ADC_TM_WARM_STATE ? "warm" : "cool");
 
+#ifdef CONFIG_SONY_FLAMINGO
+	if (state == ADC_TM_WARM_STATE) {
+		if (temp > chip->hot_bat_decidegc) {
+			/* Warm to Hot */
+			bat_hot = true;
+			bat_warm = false;
+			bat_cool = false;
+			bat_cold = false;
+			chip->adc_param.low_temp =
+				chip->hot_bat_decidegc - HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+				ADC_TM_COOL_THR_ENABLE;
+			chip->over_hot_count = chip->over_hot_count + 1;
+		} else if (temp > chip->warm_bat_decidegc) {
+			/* Normal to warm */
+			bat_hot = false;
+			bat_warm = true;
+			bat_cool = false;
+			bat_cold = false;
+			chip->adc_param.low_temp = chip->warm_bat_decidegc - HYSTERISIS_DECIDEGC;
+			chip->adc_param.high_temp = chip->hot_bat_decidegc;
+			chip->adc_param.state_request =
+				ADC_TM_HIGH_LOW_THR_ENABLE;
+		} else if (temp >
+				chip->cool_bat_decidegc){
+			/* Cool to normal */
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = false;
+			bat_cold = false;
+
+			chip->adc_param.low_temp = chip->cool_bat_decidegc - HYSTERISIS_DECIDEGC;
+			chip->adc_param.high_temp = chip->warm_bat_decidegc;
+			chip->adc_param.state_request =
+					ADC_TM_HIGH_LOW_THR_ENABLE;
+		} else if (temp >
+				chip->cold_bat_decidegc){
+			/* cold to cool */
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = true;
+			bat_cold = false;
+
+			chip->adc_param.low_temp = chip->cold_bat_decidegc - HYSTERISIS_DECIDEGC;;
+			chip->adc_param.high_temp = chip->cool_bat_decidegc;
+			chip->adc_param.state_request =
+					ADC_TM_HIGH_LOW_THR_ENABLE;
+		}
+	} else {
+		if (temp < chip->cold_bat_decidegc) {
+			/* Cool to Cold */
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = false;
+			bat_cold = true;
+			chip->adc_param.high_temp =
+				chip->cold_bat_decidegc + HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+				ADC_TM_WARM_THR_ENABLE;	
+			chip->under_cold_count = chip->under_cold_count + 1;
+		} else if (temp < chip->cool_bat_decidegc) {
+			/* Normal to cool */
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = true;
+			bat_cold = false;
+			chip->adc_param.low_temp = chip->cold_bat_decidegc;
+			chip->adc_param.high_temp = chip->cool_bat_decidegc + HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+				ADC_TM_HIGH_LOW_THR_ENABLE;
+		} else if (temp <
+				chip->warm_bat_decidegc){
+			/* Warm to normal */
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = false;
+			bat_cold = false;
+
+			chip->adc_param.low_temp = chip->cool_bat_decidegc;
+			chip->adc_param.high_temp = chip->warm_bat_decidegc + HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+				ADC_TM_HIGH_LOW_THR_ENABLE;
+		} else if (temp <
+				chip->hot_bat_decidegc){
+			/* hot to warm */
+			bat_hot = false;
+			bat_warm = true;
+			bat_cool = false;
+			bat_cold = false;
+
+			chip->adc_param.low_temp = chip->warm_bat_decidegc;
+			chip->adc_param.high_temp = chip->hot_bat_decidegc + HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+				ADC_TM_HIGH_LOW_THR_ENABLE;
+		}
+	}
+#else
 	if (state == ADC_TM_WARM_STATE) {
 		if (temp >= chip->warm_bat_decidegc) {
 			/* Normal to warm */
@@ -3775,10 +4317,31 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 					ADC_TM_HIGH_LOW_THR_ENABLE;
 		}
 	}
+#endif
 
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->bat_is_warm ^ bat_warm) {
+		if (bat_warm) {
+			qpnp_chg_tchg_max_enable(chip, false);
+		}
+		else {
+			qpnp_chg_tchg_max_set(chip, chip->tchg_mins);
+		}
+	}
+#endif
+
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->bat_is_cool ^ bat_cool || chip->bat_is_warm ^ bat_warm || 
+		chip->bat_is_cold ^ bat_cold || chip->bat_is_hot ^ bat_hot) {
+#else
 	if (chip->bat_is_cool ^ bat_cool || chip->bat_is_warm ^ bat_warm) {
+#endif
 		chip->bat_is_cool = bat_cool;
 		chip->bat_is_warm = bat_warm;
+#ifdef CONFIG_SONY_FLAMINGO
+		chip->bat_is_cold = bat_cold;
+		chip->bat_is_hot = bat_hot;
+#endif
 
 		/**
 		 * set appropriate voltages and currents.
@@ -3787,6 +4350,14 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 		 * driver will not resume with SoC. Only vbatdet is used to
 		 * determine resume of charging.
 		 */
+#ifdef CONFIG_SONY_FLAMINGO
+		if (bat_cool || bat_warm || bat_cold || bat_hot)
+			chip->resuming_charging = false;
+
+		qpnp_chg_set_appropriate_vddmax(chip);
+		qpnp_chg_set_appropriate_battery_current(chip);
+		qpnp_chg_set_appropriate_vbatdet(chip);
+#else
 		if (bat_cool || bat_warm) {
 			chip->resuming_charging = false;
 			qpnp_chg_set_appropriate_vbatdet(chip);
@@ -3806,8 +4377,12 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 			qpnp_chg_set_appropriate_vddmax(chip);
 			qpnp_chg_set_appropriate_battery_current(chip);
 		}
+#endif
 	}
 
+#ifdef CONFIG_SONY_FLAMINGO
+	pr_debug("hot  %d, cold %d\n", chip->bat_is_hot, chip->bat_is_cold);
+#endif
 	pr_debug("warm %d, cool %d, low = %d deciDegC, high = %d deciDegC\n",
 			chip->bat_is_warm, chip->bat_is_cool,
 			chip->adc_param.low_temp, chip->adc_param.high_temp);
@@ -3841,10 +4416,23 @@ qpnp_chg_configure_jeita(struct qpnp_chg_chip *chip,
 			rc = -EINVAL;
 			goto mutex_unlock;
 		}
+#ifdef CONFIG_SONY_FLAMINGO
+		if (temp_degc <=
+			(chip->cold_bat_decidegc)) {
+			pr_err("Can't set cool %d lower than cold %d\n",
+					temp_degc, chip->cold_bat_decidegc);
+			rc = -EINVAL;
+			goto mutex_unlock;
+		}
+#endif
 		if (chip->bat_is_cool)
 			chip->adc_param.high_temp =
 				temp_degc + HYSTERISIS_DECIDEGC;
+#ifdef CONFIG_SONY_FLAMINGO
+		else if (!chip->bat_is_warm && !chip->bat_is_cold && !chip->bat_is_hot)
+#else
 		else if (!chip->bat_is_warm)
+#endif
 			chip->adc_param.low_temp = temp_degc;
 
 		chip->cool_bat_decidegc = temp_degc;
@@ -3858,14 +4446,56 @@ qpnp_chg_configure_jeita(struct qpnp_chg_chip *chip,
 			rc = -EINVAL;
 			goto mutex_unlock;
 		}
+#ifdef CONFIG_SONY_FLAMINGO
+		if (temp_degc >= (chip->hot_bat_decidegc)) {
+			pr_err("Can't set warm %d higher than hot %d\n",
+					temp_degc, chip->hot_bat_decidegc);
+			rc = -EINVAL;
+			goto mutex_unlock;
+		}
+#endif
 		if (chip->bat_is_warm)
 			chip->adc_param.low_temp =
 				temp_degc - HYSTERISIS_DECIDEGC;
+#ifdef CONFIG_SONY_FLAMINGO
+		else if (!chip->bat_is_cool && !chip->bat_is_cold && !chip->bat_is_hot)
+#else		
 		else if (!chip->bat_is_cool)
+#endif
 			chip->adc_param.high_temp = temp_degc;
 
 		chip->warm_bat_decidegc = temp_degc;
 		break;
+#ifdef CONFIG_SONY_FLAMINGO
+	case POWER_SUPPLY_PROP_COLD_TEMP:
+		if (temp_degc >= (chip->cool_bat_decidegc)) {
+			pr_err("Can't set cold %d higher than cool %d\n",
+					temp_degc, chip->cool_bat_decidegc);
+			rc = -EINVAL;
+			goto mutex_unlock;
+		}
+		if (chip->bat_is_cold)
+			chip->adc_param.high_temp =
+				temp_degc + HYSTERISIS_DECIDEGC;
+		else if (chip->bat_is_cool)
+			chip->adc_param.low_temp = temp_degc;
+		chip->cold_bat_decidegc = temp_degc;
+		break;
+	case POWER_SUPPLY_PROP_HOT_TEMP:
+		if (temp_degc <= (chip->warm_bat_decidegc)) {
+			pr_err("Can't set hot %d lower than warm %d\n",
+					temp_degc, chip->warm_bat_decidegc);
+			rc = -EINVAL;
+			goto mutex_unlock;
+		}
+		if (chip->bat_is_hot)
+			chip->adc_param.low_temp =
+				temp_degc - HYSTERISIS_DECIDEGC;
+		else if (chip->bat_is_warm)
+			chip->adc_param.high_temp = temp_degc;
+		chip->hot_bat_decidegc = temp_degc;
+		break;
+#endif
 	default:
 		rc = -EINVAL;
 		goto mutex_unlock;
@@ -4137,6 +4767,14 @@ qpnp_batt_power_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_WARM_TEMP:
 		rc = qpnp_chg_configure_jeita(chip, psp, val->intval);
 		break;
+#ifdef CONFIG_SONY_FLAMINGO
+	case POWER_SUPPLY_PROP_COLD_TEMP:
+		rc = qpnp_chg_configure_jeita(chip, psp, val->intval);
+		break;
+	case POWER_SUPPLY_PROP_HOT_TEMP:
+		rc = qpnp_chg_configure_jeita(chip, psp, val->intval);
+		break;
+#endif
 	case POWER_SUPPLY_PROP_CAPACITY:
 		chip->fake_battery_soc = val->intval;
 		power_supply_changed(&chip->batt_psy);
@@ -4176,6 +4814,23 @@ qpnp_batt_power_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
 		qpnp_chg_vinmin_set(chip, val->intval / 1000);
 		break;
+#ifdef CONFIG_SONY_FLAMINGO
+	case POWER_SUPPLY_PROP_IS_DURING_CALL:
+		chip->is_during_call = val->intval;
+		qpnp_chg_set_appropriate_vddmax(chip);
+		qpnp_chg_set_appropriate_battery_current(chip);
+		qpnp_chg_set_appropriate_vbatdet(chip);
+		if (chip->is_during_call) {
+			qpnp_chg_tchg_max_enable(chip, false);
+		}
+		else {
+			qpnp_chg_tchg_max_set(chip, chip->tchg_mins);
+		}
+		break;
+	case POWER_SUPPLY_PROP_IS_MAINTAIN:
+		chip->is_maintain_start = val->intval;
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -4762,10 +5417,17 @@ qpnp_chg_hwinit(struct qpnp_chg_chip *chip, u8 subtype,
 
 		if ((subtype == SMBBP_USB_CHGPTH_SUBTYPE) ||
 			(subtype == SMBCL_USB_CHGPTH_SUBTYPE)) {
+#ifdef CONFIG_SONY_FLAMINGO
+			rc = qpnp_chg_masked_write(chip,
+				chip->usb_chgpth_base + USB_OCP_THR,
+				OCP_THR_MASK,
+				OCP_THR_200_MA, 1);
+#else
 			rc = qpnp_chg_masked_write(chip,
 				chip->usb_chgpth_base + USB_OCP_THR,
 				OCP_THR_MASK,
 				OCP_THR_900_MA, 1);
+#endif
 			if (rc)
 				pr_err("Failed to configure OCP rc = %d\n", rc);
 		}
@@ -4875,11 +5537,24 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 	OF_PROP_READ(chip, warm_bat_decidegc, "warm-bat-decidegc", rc, 1);
 	OF_PROP_READ(chip, cool_bat_decidegc, "cool-bat-decidegc", rc, 1);
 	OF_PROP_READ(chip, tchg_mins, "tchg-mins", rc, 1);
+#ifdef CONFIG_SONY_FLAMINGO
+	OF_PROP_READ(chip, usb_tchg_mins, "usb-tchg-mins", rc, 1);
+	OF_PROP_READ(chip, ac_tchg_mins, "ac-tchg-mins", rc, 1);
+#endif	
 	OF_PROP_READ(chip, hot_batt_p, "batt-hot-percentage", rc, 1);
 	OF_PROP_READ(chip, cold_batt_p, "batt-cold-percentage", rc, 1);
 	OF_PROP_READ(chip, soc_resume_limit, "resume-soc", rc, 1);
 	OF_PROP_READ(chip, batt_weak_voltage_mv, "vbatweak-mv", rc, 1);
 	OF_PROP_READ(chip, vbatdet_max_err_mv, "vbatdet-maxerr-mv", rc, 1);
+#ifdef CONFIG_SONY_FLAMINGO
+	OF_PROP_READ(chip, hot_bat_decidegc, "hot-bat-decidegc", rc, 1);
+	OF_PROP_READ(chip, cold_bat_decidegc, "cold-bat-decidegc", rc, 1);
+	OF_PROP_READ(chip, call_bat_mv, "call-bat-mv", rc, 1);
+	OF_PROP_READ(chip, first_maintain_mins, "first-maintain-mins", rc, 1);
+	OF_PROP_READ(chip, second_maintain_mins, "second-maintain-mins", rc, 1);
+	OF_PROP_READ(chip, first_maintain_mv, "first-maintain-mv", rc, 1);
+	OF_PROP_READ(chip, second_maintain_mv, "second-maintain-mv", rc, 1);
+#endif
 
 	if (rc)
 		return rc;
@@ -4930,6 +5605,11 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 
 	ext_ovp_present = of_property_read_bool(chip->spmi->dev.of_node,
 					"qcom,ext-ovp-present");
+
+#ifdef CONFIG_SONY_FLAMINGO
+	chip->charging_timer_enable = of_property_read_bool(chip->spmi->dev.of_node,
+					"qcom,charging-timer-enable");
+#endif
 
 	/* Check if external IOVP part is configured */
 	chip->ext_ovp_isns_gpio = of_get_named_gpio(chip->spmi->dev.of_node,
@@ -5235,6 +5915,16 @@ qpnp_charger_probe(struct spmi_device *spmi)
 	dev_set_drvdata(&spmi->dev, chip);
 	device_init_wakeup(&spmi->dev, 1);
 
+#ifdef CONFIG_SONY_FLAMINGO
+	chip->chg_failed_flag = 0;
+	chip->over_hot_count = 0;
+	chip->under_cold_count = 0;
+	chip->maintenance_count = 0;
+	chip->is_maintain_start	= false;
+	chip->is_first_maintain = false;
+	chip->is_second_maintain = false;
+#endif
+
 	chip->insertion_ocv_uv = -EINVAL;
 	chip->batt_present = qpnp_chg_is_batt_present(chip);
 	if (chip->bat_if_base) {
@@ -5270,6 +5960,9 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			qpnp_usbin_health_check_work);
 	INIT_WORK(&chip->soc_check_work, qpnp_chg_soc_check_work);
 	INIT_DELAYED_WORK(&chip->aicl_check_work, qpnp_aicl_check_work);
+#ifdef CONFIG_SONY_FLAMINGO
+	INIT_DELAYED_WORK(&chip->charging_maintenance_work, qpnp_charging_maintenance_work);
+#endif
 
 	if (chip->dc_chgpth_base) {
 		chip->dc_psy.name = "qpnp-dc";
@@ -5394,6 +6087,12 @@ qpnp_charger_remove(struct spmi_device *spmi)
 							&chip->adc_param);
 	}
 
+#ifdef CONFIG_SONY_FLAMINGO
+	if (chip->is_maintain_start) {
+		cancel_delayed_work_sync(&chip->charging_maintenance_work);
+	}
+#endif
+
 	cancel_delayed_work_sync(&chip->aicl_check_work);
 	power_supply_unregister(&chip->dc_psy);
 	cancel_work_sync(&chip->soc_check_work);
@@ -5440,10 +6139,17 @@ static int qpnp_chg_suspend(struct device *dev)
 	int rc = 0;
 
 	if (chip->bat_if_base) {
+#ifdef CONFIG_SONY_FLAMINGO
+		rc = qpnp_chg_masked_write(chip,
+			chip->bat_if_base + BAT_IF_VREF_BAT_THM_CTRL,
+			VREF_BATT_THERM_FORCE_ON,
+			VREF_BATT_THERM_FORCE_ON, 1);
+#else
 		rc = qpnp_chg_masked_write(chip,
 			chip->bat_if_base + BAT_IF_VREF_BAT_THM_CTRL,
 			VREF_BATT_THERM_FORCE_ON,
 			VREF_BAT_THM_ENABLED_FSM, 1);
+#endif
 		if (rc)
 			pr_debug("failed to set FSM VREF_BAT_THM rc=%d\n", rc);
 	}

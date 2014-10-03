@@ -1204,11 +1204,19 @@ after_table_write:
 
 	QPNP_SET_PAUSE_CNT(lut_config->lut_pause_lo_cnt,
 			lut_params.lut_pause_lo, ramp_step_ms);
+#ifdef CONFIG_SONY_FLAMINGO
+	if (lut_config->lut_pause_lo_cnt >= 3)
+		lut_config->lut_pause_lo_cnt -= 2;
+#endif
 	if (lut_config->lut_pause_lo_cnt > PM_PWM_MAX_PAUSE_CNT)
 		lut_config->lut_pause_lo_cnt = PM_PWM_MAX_PAUSE_CNT;
 
 	QPNP_SET_PAUSE_CNT(lut_config->lut_pause_hi_cnt,
 			lut_params.lut_pause_hi, ramp_step_ms);
+#ifdef CONFIG_SONY_FLAMINGO
+	if (lut_config->lut_pause_hi_cnt >= 3)
+		lut_config->lut_pause_hi_cnt -= 2;
+#endif
 	if (lut_config->lut_pause_hi_cnt > PM_PWM_MAX_PAUSE_CNT)
 			lut_config->lut_pause_hi_cnt = PM_PWM_MAX_PAUSE_CNT;
 

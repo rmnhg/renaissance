@@ -76,6 +76,31 @@ static struct msm_gpiomux_config msm_eth_configs[] = {
 };
 #endif
 
+#if defined(CONFIG_TOUCHSCREEN_ELAN_EKTF3135)
+static struct gpiomux_setting elan_ektf3135_int_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting elan_ektf3135_int_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+static struct gpiomux_setting elan_ektf3135_res_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting elan_ektf3135_res_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+#else
 static struct gpiomux_setting synaptics_int_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_8MA,
@@ -99,6 +124,7 @@ static struct gpiomux_setting synaptics_reset_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct gpiomux_setting gpio_keys_active = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -129,11 +155,13 @@ static struct gpiomux_setting gpio_spi_susp_config = {
 	.pull = GPIOMUX_PULL_DOWN,
 };
 
+#ifndef CONFIG_PN544
 static struct gpiomux_setting gpio_spi_cs_eth_config = {
 	.func = GPIOMUX_FUNC_4,
 	.drv = GPIOMUX_DRV_6MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct gpiomux_setting wcnss_5wire_suspend_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -165,6 +193,47 @@ static struct gpiomux_setting gpio_i2c_config = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+#ifdef CONFIG_PN544
+static struct gpiomux_setting pn544_int_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_IN,
+};
+static struct gpiomux_setting pn544_ven_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_OUT_LOW,
+};
+static struct gpiomux_setting pn544_firm_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_OUT_LOW,
+};
+static struct msm_gpiomux_config pn544_configs[] __initdata = {
+	{
+		.gpio = 22,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &pn544_firm_cfg,
+		},
+	},
+	{
+		.gpio = 20,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &pn544_ven_cfg,
+		},
+	},
+	{
+		.gpio = 21,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &pn544_int_cfg,
+		},
+	},
+};
+#endif
+
 static struct msm_gpiomux_config msm_keypad_configs[] __initdata = {
 	{
 		.gpio = 106,
@@ -187,7 +256,31 @@ static struct msm_gpiomux_config msm_keypad_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_keys_suspend,
 		},
 	},
+/* [Arima5908][32701][JessicaTseng] [All][Main][Key][DMS]Using volume_down key enters fastboot mode 20140103 start */
+	{
+		.gpio = 110,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &gpio_keys_active,
+			[GPIOMUX_SUSPENDED] = &gpio_keys_suspend,
+		},
+	},
 };
+
+#ifdef CONFIG_SONY_FLAMINGO
+static struct gpiomux_setting lcd_id_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+	.dir = GPIOMUX_IN,
+};
+
+static struct gpiomux_setting lcd_id_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_IN,
+};
+#endif
 
 static struct gpiomux_setting lcd_rst_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -203,6 +296,15 @@ static struct gpiomux_setting lcd_rst_sus_cfg = {
 };
 
 static struct msm_gpiomux_config msm_lcd_configs[] __initdata = {
+#ifdef CONFIG_SONY_FLAMINGO
+	{
+		.gpio = 27,		/* LCD ID */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &lcd_id_act_cfg,
+			[GPIOMUX_SUSPENDED] = &lcd_id_sus_cfg,
+		},
+	},
+#endif
 	{
 		.gpio = 25,		/* LCD Reset */
 		.settings = {
@@ -248,6 +350,7 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
 		},
 	},
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio      = 14,	/* BLSP1 QUP4 I2C_SDA */
 		.settings = {
@@ -262,6 +365,7 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
+#endif
 	{
 		.gpio      = 18,		/* BLSP1 QUP5 I2C_SDA */
 		.settings = {
@@ -276,12 +380,14 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
+#ifndef CONFIG_PN544
 	{
 		.gpio      = 22,		/* BLSP1 QUP1 SPI_CS_ETH */
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_spi_cs_eth_config,
 		},
 	},
+#endif
 	{					/*  NFC   */
 		.gpio      = 10,		/* BLSP1 QUP3 I2C_DAT */
 		.settings = {
@@ -298,6 +404,26 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 	},
 };
 
+/* #//[All][Main][TP][32772]20140106,Eric, Porting elan-ektf3135 touch driver. */
+#if defined(CONFIG_TOUCHSCREEN_ELAN_EKTF3135)
+static struct msm_gpiomux_config elan_ektf3135_io_configs[] __initdata = {
+	{
+		.gpio = 16,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &elan_ektf3135_res_act_cfg,
+			[GPIOMUX_SUSPENDED] = &elan_ektf3135_res_sus_cfg,
+		},
+	},
+	{
+		.gpio = 17,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &elan_ektf3135_int_act_cfg,
+			[GPIOMUX_SUSPENDED] = &elan_ektf3135_int_sus_cfg,
+		},
+	},
+};
+
+#else
 static struct msm_gpiomux_config msm_synaptics_configs[] __initdata = {
 	{
 		.gpio = 16,
@@ -314,6 +440,7 @@ static struct msm_gpiomux_config msm_synaptics_configs[] __initdata = {
 		},
 	},
 };
+#endif
 
 static struct gpiomux_setting gpio_nc_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -321,6 +448,7 @@ static struct gpiomux_setting gpio_nc_cfg = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+#ifndef CONFIG_SONY_FLAMINGO
 static struct gpiomux_setting goodix_ldo_en_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_6MA,
@@ -332,6 +460,7 @@ static struct gpiomux_setting goodix_ldo_en_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct gpiomux_setting goodix_int_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -376,15 +505,18 @@ static struct msm_gpiomux_config msm_skuf_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_nc_cfg,
 		},
 	},
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio      = 14,	/* NC */
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_nc_cfg,
 		},
 	},
+#endif
 };
 
 static struct msm_gpiomux_config msm_skuf_goodix_configs[] __initdata = {
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio = 15,		/* LDO EN */
 		.settings = {
@@ -392,6 +524,7 @@ static struct msm_gpiomux_config msm_skuf_goodix_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &goodix_ldo_en_sus_cfg,
 		},
 	},
+	#endif
 	{
 		.gpio = 16,		/* RESET */
 		.settings = {
@@ -651,6 +784,7 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &cam_settings[1],
 		},
 	},
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio = 27, /* CAM_MCLK1 */
 		.settings = {
@@ -659,6 +793,7 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 		},
 
 	},
+#endif
 	{
 		.gpio = 29, /* CCI_I2C_SDA0 */
 		.settings = {
@@ -722,6 +857,19 @@ static struct msm_gpiomux_config msm_sensor_configs_skuf_plus[] __initdata = {
 };
 
 
+#ifdef CONFIG_SONY_FLAMINGO
+static struct gpiomux_setting auxpcm_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting auxpcm_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+#else
 static struct gpiomux_setting auxpcm_act_cfg = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
@@ -733,6 +881,7 @@ static struct gpiomux_setting auxpcm_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct msm_gpiomux_config msm_auxpcm_configs[] __initdata = {
 	{
@@ -896,8 +1045,18 @@ void __init msm8226_init_gpiomux(void)
 		msm_gpiomux_install(msm_skuf_goodix_configs,
 				ARRAY_SIZE(msm_skuf_goodix_configs));
 	else
+#if defined(CONFIG_TOUCHSCREEN_ELAN_EKTF3135)
+	msm_gpiomux_install(elan_ektf3135_io_configs,
+					ARRAY_SIZE(elan_ektf3135_io_configs));
+#else
 		msm_gpiomux_install(msm_synaptics_configs,
 				ARRAY_SIZE(msm_synaptics_configs));
+#endif
+
+#ifdef CONFIG_PN544
+	msm_gpiomux_install(pn544_configs,
+			ARRAY_SIZE(pn544_configs));
+#endif
 
 	if (of_board_is_skuf())
 		msm_gpiomux_install(msm_skuf_nfc_configs,
@@ -928,8 +1087,10 @@ void __init msm8226_init_gpiomux(void)
 	 */
 #ifdef CONFIG_USB_EHCI_MSM_HSIC
 	if (machine_is_msm8926()) {
+#ifndef CONFIG_SONY_FLAMINGO	
 		msm_hsic_configs[0].gpio = 119; /* STROBE */
 		msm_hsic_configs[1].gpio = 120; /* DATA */
+#endif
 	}
 	msm_gpiomux_install(msm_hsic_configs, ARRAY_SIZE(msm_hsic_configs));
 #endif

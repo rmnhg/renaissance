@@ -301,6 +301,10 @@ struct mdss_dsi_ctrl_pdata {
 
 	struct dsi_buf tx_buf;
 	struct dsi_buf rx_buf;
+#ifdef CONFIG_SONY_FLAMINGO
+	struct regulator *vdd_io_vreg;
+	struct regulator *vdda_vreg;
+#endif	
 };
 
 struct dsi_status_data {

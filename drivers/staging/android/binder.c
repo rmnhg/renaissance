@@ -1404,6 +1404,9 @@ static void binder_transaction(struct binder_proc *proc,
 	struct binder_transaction *t;
 	struct binder_work *tcomplete;
 	size_t *offp, *off_end;
+#ifdef CONFIG_SONY_FLAMINGO
+	size_t off_min;
+#endif
 	struct binder_proc *target_proc;
 	struct binder_thread *target_thread = NULL;
 	struct binder_node *target_node = NULL;
@@ -1604,18 +1607,35 @@ static void binder_transaction(struct binder_proc *proc,
 		goto err_bad_offset;
 	}
 	off_end = (void *)offp + tr->offsets_size;
+#ifdef CONFIG_SONY_FLAMINGO
+	off_min = 0;
+#endif
 	for (; offp < off_end; offp++) {
 		struct flat_binder_object *fp;
 		if (*offp > t->buffer->data_size - sizeof(*fp) ||
+#ifdef CONFIG_SONY_FLAMINGO
+		    *offp < off_min ||
+#endif
 		    t->buffer->data_size < sizeof(*fp) ||
 		    !IS_ALIGNED(*offp, sizeof(void *))) {
 			binder_user_error("binder: %d:%d got transaction with "
+#ifdef CONFIG_SONY_FLAMINGO
+				"invalid offset, %zd (min %zd, max %zd)\n",
+				proc->pid, thread->pid, *offp,
+				off_min,
+				(size_t)(t->buffer->data_size -
+				sizeof(*fp)));
+#else
 				"invalid offset, %zd\n",
 				proc->pid, thread->pid, *offp);
+#endif
 			return_error = BR_FAILED_REPLY;
 			goto err_bad_offset;
 		}
 		fp = (struct flat_binder_object *)(t->buffer->data + *offp);
+#ifdef CONFIG_SONY_FLAMINGO
+		off_min = *offp + sizeof(struct flat_binder_object);
+#endif
 		switch (fp->type) {
 		case BINDER_TYPE_BINDER:
 		case BINDER_TYPE_WEAK_BINDER: {
