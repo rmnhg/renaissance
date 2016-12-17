@@ -486,6 +486,9 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_WHITE_BALANCE,
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
+#ifdef CONFIG_SONY_FLAMINGO
+	CFG_SET_FPS,
+#endif
 };
 
 enum msm_actuator_cfg_type_t {

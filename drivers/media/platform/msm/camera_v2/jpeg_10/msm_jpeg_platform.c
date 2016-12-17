@@ -288,7 +288,11 @@ int msm_jpeg_platform_init(struct platform_device *pdev,
 	*base = jpeg_base;
 	*irq  = jpeg_irq;
 
+#ifdef CONFIG_SONY_FLAMINGO
+	pgmn_dev->jpeg_client = msm_ion_client_create(-1, "jpeg");
+#else
 	pgmn_dev->jpeg_client = msm_ion_client_create(-1, "camera/jpeg");
+#endif
 	JPEG_DBG("%s:%d] success\n", __func__, __LINE__);
 
 	pgmn_dev->state = MSM_JPEG_INIT;
