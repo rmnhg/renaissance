@@ -112,6 +112,31 @@ static struct msm_gpiomux_config msm_eth_configs[] = {
 };
 #endif
 
+#if defined(CONFIG_TOUCHSCREEN_ELAN_EKTF3135)
+static struct gpiomux_setting elan_ektf3135_int_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting elan_ektf3135_int_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+static struct gpiomux_setting elan_ektf3135_res_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting elan_ektf3135_res_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+#else
 static struct gpiomux_setting synaptics_int_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_8MA,
@@ -135,6 +160,7 @@ static struct gpiomux_setting synaptics_reset_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct gpiomux_setting gpio_keys_active = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -337,6 +363,24 @@ static struct msm_gpiomux_config msm_blsp_spi_cs_config[] __initdata = {
 	},
 };
 
+#if defined(CONFIG_TOUCHSCREEN_ELAN_EKTF3135)
+static struct msm_gpiomux_config elan_ektf3135_io_configs[] __initdata = {
+	{
+		.gpio = 16,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &elan_ektf3135_res_act_cfg,
+			[GPIOMUX_SUSPENDED] = &elan_ektf3135_res_sus_cfg,
+		},
+	},
+	{
+		.gpio = 17,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &elan_ektf3135_int_act_cfg,
+			[GPIOMUX_SUSPENDED] = &elan_ektf3135_int_sus_cfg,
+		},
+	},
+};
+#else
 static struct msm_gpiomux_config msm_synaptics_configs[] __initdata = {
 	{
 		.gpio = 16,
@@ -353,6 +397,7 @@ static struct msm_gpiomux_config msm_synaptics_configs[] __initdata = {
 		},
 	},
 };
+#endif
 
 static struct gpiomux_setting gpio_nc_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -939,8 +984,13 @@ void __init msm8226_init_gpiomux(void)
 		msm_gpiomux_install(msm_skuf_goodix_configs,
 				ARRAY_SIZE(msm_skuf_goodix_configs));
 	else
+#if defined(CONFIG_TOUCHSCREEN_ELAN_EKTF3135)
+	msm_gpiomux_install(elan_ektf3135_io_configs,
+					ARRAY_SIZE(elan_ektf3135_io_configs));
+#else
 		msm_gpiomux_install(msm_synaptics_configs,
 				ARRAY_SIZE(msm_synaptics_configs));
+#endif
 
 	if (of_board_is_skuf())
 		msm_gpiomux_install(msm_skuf_nfc_configs,
