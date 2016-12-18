@@ -213,7 +213,32 @@ static struct msm_gpiomux_config msm_keypad_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_keys_suspend,
 		},
 	},
+#ifdef CONFIG_SONY_FLAMINGO
+	{
+		.gpio = 110,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &gpio_keys_active,
+			[GPIOMUX_SUSPENDED] = &gpio_keys_suspend,
+		},
+	},
+#endif
 };
+
+#ifdef CONFIG_SONY_FLAMINGO
+static struct gpiomux_setting lcd_id_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+	.dir = GPIOMUX_IN,
+};
+
+static struct gpiomux_setting lcd_id_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_IN,
+};
+#endif
 
 static struct gpiomux_setting lcd_rst_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -229,6 +254,15 @@ static struct gpiomux_setting lcd_rst_sus_cfg = {
 };
 
 static struct msm_gpiomux_config msm_lcd_configs[] __initdata = {
+#ifdef CONFIG_SONY_FLAMINGO
+	{
+		.gpio = 27,		/* LCD ID */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &lcd_id_act_cfg,
+			[GPIOMUX_SUSPENDED] = &lcd_id_sus_cfg,
+		},
+	},
+#endif
 	{
 		.gpio = 25,		/* LCD Reset */
 		.settings = {
@@ -274,6 +308,7 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
 		},
 	},
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio      = 14,	/* BLSP1 QUP4 I2C_SDA */
 		.settings = {
@@ -288,6 +323,7 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
+#endif
 	{
 		.gpio      = 18,		/* BLSP1 QUP5 I2C_SDA */
 		.settings = {
@@ -367,6 +403,7 @@ static struct gpiomux_setting gpio_nc_cfg = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+#ifndef CONFIG_SONY_FLAMINGO
 static struct gpiomux_setting goodix_ldo_en_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_6MA,
@@ -378,6 +415,7 @@ static struct gpiomux_setting goodix_ldo_en_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct gpiomux_setting goodix_int_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -422,15 +460,18 @@ static struct msm_gpiomux_config msm_skuf_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_nc_cfg,
 		},
 	},
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio      = 14,	/* NC */
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &gpio_nc_cfg,
 		},
 	},
+#endif
 };
 
 static struct msm_gpiomux_config msm_skuf_goodix_configs[] __initdata = {
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio = 15,		/* LDO EN */
 		.settings = {
@@ -438,6 +479,7 @@ static struct msm_gpiomux_config msm_skuf_goodix_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &goodix_ldo_en_sus_cfg,
 		},
 	},
+	#endif
 	{
 		.gpio = 16,		/* RESET */
 		.settings = {
@@ -697,6 +739,7 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &cam_settings[1],
 		},
 	},
+#ifndef CONFIG_SONY_FLAMINGO
 	{
 		.gpio = 27, /* CAM_MCLK1 */
 		.settings = {
@@ -705,6 +748,7 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 		},
 
 	},
+#endif
 	{
 		.gpio = 29, /* CCI_I2C_SDA0 */
 		.settings = {
@@ -768,6 +812,19 @@ static struct msm_gpiomux_config msm_sensor_configs_skuf_plus[] __initdata = {
 };
 
 
+#ifdef CONFIG_SONY_FLAMINGO
+static struct gpiomux_setting auxpcm_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting auxpcm_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+#else
 static struct gpiomux_setting auxpcm_act_cfg = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
@@ -779,6 +836,7 @@ static struct gpiomux_setting auxpcm_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
 
 static struct msm_gpiomux_config msm_auxpcm_configs[] __initdata = {
 	{
@@ -979,8 +1037,10 @@ void __init msm8226_init_gpiomux(void)
 	 */
 #ifdef CONFIG_USB_EHCI_MSM_HSIC
 	if (machine_is_msm8926()) {
+#ifndef CONFIG_SONY_FLAMINGO	
 		msm_hsic_configs[0].gpio = 119; /* STROBE */
 		msm_hsic_configs[1].gpio = 120; /* DATA */
+#endif
 	}
 	msm_gpiomux_install(msm_hsic_configs, ARRAY_SIZE(msm_hsic_configs));
 #endif
