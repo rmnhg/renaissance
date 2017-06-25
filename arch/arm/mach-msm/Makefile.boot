@@ -101,7 +101,9 @@ endif
 # MSM8226
    zreladdr-$(CONFIG_ARCH_MSM8226)	:= 0x00008000
 	dtb-$(CONFIG_ARCH_MSM8226)  += msm8926-8926ss_ap.dtb
-
+	dtb-$(CONFIG_ARCH_MSM8226)  += msm8226-flamingo_ds.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)  += msm8226-flamingo_ss.dtb
+	
 # FSM9XXX
    zreladdr-$(CONFIG_ARCH_FSM9XXX)	:= 0x10008000
 params_phys-$(CONFIG_ARCH_FSM9XXX)	:= 0x10000100
