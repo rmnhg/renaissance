@@ -89,7 +89,7 @@
 			status = "okay";
 			qcom,led_mpp_2 {
 				label = "mpp";
-				linux,name = "blue";
+				linux,name = "led:rgb_blue";
 				linux,default-trigger = "none";
 				qcom,default-state = "off";
 				qcom,max-current = <40>;
@@ -111,7 +111,7 @@
 			status = "okay";
 			qcom,led_mpp_4 {
 				label = "mpp";
-				linux,name = "green";
+				linux,name = "led:rgb_green";
 				linux,default-trigger = "none";
 				qcom,default-state = "off";
 				qcom,max-current = <40>;
@@ -133,7 +133,7 @@
 			status = "okay";
 			qcom,led_mpp_6 {
 				label = "mpp";
-				linux,name = "red";
+				linux,name = "led:rgb_red";
 				linux,default-trigger = "none";
 				qcom,default-state = "off";
 				qcom,max-current = <40>;
@@ -161,7 +161,18 @@
 	};
 };
 /* [Arima5908][32708][JessicaTseng] [All][Main][LED][DMS]Porting R/G/B LED 20140103 end */
+&pm8226_l27 {
+	regulator-min-microvolt = <2050000>;
+	regulator-max-microvolt = <2050000>;
+	qcom,init-voltage = <2050000>;
+	regulator-always-on;
+};
 
+&pm8226_l28 {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <2950000>;
+	qcom,init-voltage = <1800000>;
+};
 /*[Arima5908][32742][bozhi_lin] modify battery capacity to 2300mA for BA950 20140108 begin*/
 &mtp_batterydata{
 	qcom,rpull-up-kohm = <100>;
