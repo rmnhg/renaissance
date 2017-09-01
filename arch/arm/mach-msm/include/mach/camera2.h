@@ -37,6 +37,14 @@ enum msm_bus_perf_setting {
 	S_EXIT
 };
 
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+enum cci_i2c_master_t {
+	MASTER_0,
+	MASTER_1,
+	MASTER_MAX,
+};
+
+#endif
 struct msm_camera_slave_info {
 	uint16_t sensor_slave_addr;
 	uint16_t sensor_id_reg_addr;
@@ -62,6 +70,7 @@ struct v4l2_subdev_info {
 	uint16_t order;
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 struct msm_camera_power_ctrl_t {
 	struct device *dev;
 	struct msm_sensor_power_setting *power_setting;
@@ -76,18 +85,36 @@ struct msm_camera_power_ctrl_t {
 	uint16_t clk_info_size;
 };
 
+#endif
 struct msm_camera_sensor_board_info {
 	const char *sensor_name;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	const char *eeprom_name;
 	const char *actuator_name;
+#endif
 	struct msm_camera_slave_info *slave_info;
 	struct msm_camera_csi_lane_params *csi_lane_params;
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+	struct camera_vreg_t *cam_vreg;
+	int num_vreg;
+#endif
 	struct msm_camera_sensor_strobe_flash_data *strobe_flash_data;
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+	struct msm_camera_gpio_conf *gpio_conf;
+#endif
 	struct msm_actuator_info *actuator_info;
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+	struct msm_camera_i2c_conf *i2c_conf;
+#endif
 	struct msm_sensor_info_t *sensor_info;
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+	struct msm_sensor_init_params *sensor_init_params;
+#endif
 	const char *misc_regulator;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	struct msm_camera_power_ctrl_t power_info;
 	struct msm_camera_sensor_slave_info *cam_slave_info;
+#endif
 };
 
 enum msm_camera_i2c_cmd_type {
@@ -119,18 +146,25 @@ struct eeprom_map_t {
 	uint32_t delay;
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 struct eeprom_slave_add_t {
 	uint32_t addr;
 };
 
 struct msm_eeprom_memory_map_t {
+#else
+struct eeprom_memory_map_t {
+#endif
 	struct eeprom_map_t page;
 	struct eeprom_map_t pageen;
 	struct eeprom_map_t poll;
 	struct eeprom_map_t mem;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	struct eeprom_slave_add_t saddr;
+#endif
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 struct msm_eeprom_memory_block_t {
 	struct msm_eeprom_memory_map_t *map;
 	uint32_t num_map;	/* number of map blocks */
@@ -143,13 +177,31 @@ struct msm_eeprom_mm_t {
 	uint32_t mm_compression;
 	uint32_t mm_offset;
 	uint32_t mm_size;
+#else
+struct msm_camera_power_ctrl_t {
+	struct device *dev;
+	struct msm_sensor_power_setting *power_setting;
+	uint16_t power_setting_size;
+	struct msm_camera_gpio_conf *gpio_conf;
+	struct camera_vreg_t *cam_vreg;
+	int num_vreg;
+	struct msm_camera_i2c_conf *i2c_conf;
+	struct msm_cam_clk_info *clk_info;
+	uint16_t clk_info_size;
+#endif
 };
 
 struct msm_eeprom_board_info {
 	const char *eeprom_name;
 	uint16_t i2c_slaveaddr;
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+	uint32_t num_blocks;
+	struct eeprom_memory_map_t *eeprom_map;
+#endif
 	struct msm_camera_power_ctrl_t power_info;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	struct msm_eeprom_mm_t mm_data;
+#endif
 };
 
 #endif

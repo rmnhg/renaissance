@@ -12,8 +12,10 @@
 #define I2C_SEQ_REG_DATA_MAX      20
 #define MAX_CID                   16
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define I2C_USER_REG_DATA_MAX 1024
 
+#endif
 #define MSM_SENSOR_MCLK_8HZ   8000000
 #define MSM_SENSOR_MCLK_16HZ  16000000
 #define MSM_SENSOR_MCLK_24HZ  24000000
@@ -42,24 +44,30 @@
 #define MAX_ACTUATOR_REGION 5
 #define MAX_ACTUATOR_INIT_SET 12
 #define MAX_ACTUATOR_REG_TBL_SIZE 8
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define MAX_ACTUATOR_AF_TOTAL_STEPS 1024
+#endif
 
 #define MOVE_NEAR 0
 #define MOVE_FAR  1
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define MSM_ACTUATOR_MOVE_SIGNED_FAR -1
 #define MSM_ACTUATOR_MOVE_SIGNED_NEAR  1
 
+#endif
 #define MAX_EEPROM_NAME 32
 
 #define MAX_AF_ITERATIONS 3
 #define MAX_NUMBER_OF_STEPS 47
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define MAX_POWER_CONFIG 12
 
 typedef enum sensor_stats_type {
 	YRGB,
 	YYYY,
 } sensor_stats_type_t;
+#endif
 
 enum flash_type {
 	LED_FLASH = 1,
@@ -106,8 +114,10 @@ enum msm_sensor_power_seq_gpio_t {
 	SENSOR_GPIO_VANA,
 	SENSOR_GPIO_VDIG,
 	SENSOR_GPIO_VAF,
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	SENSOR_GPIO_FL_EN,
 	SENSOR_GPIO_FL_NOW,
+#endif
 	SENSOR_GPIO_MAX,
 };
 
@@ -235,8 +245,10 @@ struct msm_sensor_power_setting {
 struct msm_sensor_power_setting_array {
 	struct msm_sensor_power_setting *power_setting;
 	uint16_t size;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	struct msm_sensor_power_setting *power_down_setting;
 	uint16_t size_down;
+#endif
 };
 
 struct msm_sensor_id_info_t {
@@ -244,6 +256,7 @@ struct msm_sensor_id_info_t {
 	uint16_t sensor_id;
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 enum msm_sensor_camera_id_t {
 	CAMERA_0,
 	CAMERA_1,
@@ -257,7 +270,14 @@ enum cci_i2c_master_t {
 	MASTER_1,
 	MASTER_MAX,
 };
-
+#else
+struct msm_camera_sensor_slave_info {
+	uint16_t slave_addr;
+	enum msm_camera_i2c_reg_addr_type addr_type;
+	struct msm_sensor_id_info_t sensor_id_info;
+	struct msm_sensor_power_setting_array power_setting_array;
+};
+#endif
 
 struct msm_camera_i2c_reg_array {
 	uint16_t reg_addr;
@@ -342,13 +362,16 @@ struct csi_lane_params_t {
 	uint8_t csi_phy_sel;
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 enum camb_position_t {
 	BACK_CAMERA_B,
 	FRONT_CAMERA_B,
 	INVALID_CAMERA_B,
 };
 
+#endif
 struct msm_sensor_info_t {
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	char     sensor_name[MAX_SENSOR_NAME];
 	int32_t  session_id;
 	int32_t  subdev_id[SUB_MODULE_MAX];
@@ -356,6 +379,11 @@ struct msm_sensor_info_t {
 	uint32_t sensor_mount_angle;
 	int modes_supported;
 	enum camb_position_t position;
+#else
+	char sensor_name[MAX_SENSOR_NAME];
+	int32_t    session_id;
+	int32_t     subdev_id[SUB_MODULE_MAX];
+#endif
 };
 
 struct camera_vreg_t {
@@ -367,10 +395,21 @@ struct camera_vreg_t {
 	uint32_t delay;
 };
 
+#ifdef CONFIG_MSMB_CAMERA_FLAMINGO
+enum camb_position_t {
+	BACK_CAMERA_B,
+	FRONT_CAMERA_B,
+};
+
+#endif
 enum camerab_mode_t {
 	CAMERA_MODE_2D_B = (1<<0),
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	CAMERA_MODE_3D_B = (1<<1),
 	CAMERA_MODE_INVALID = (1<<2),
+#else
+	CAMERA_MODE_3D_B = (1<<1)
+#endif
 };
 
 struct msm_sensor_init_params {
@@ -382,6 +421,7 @@ struct msm_sensor_init_params {
 	uint32_t            sensor_mount_angle;
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 struct msm_camera_sensor_slave_info {
 	char sensor_name[32];
 	char eeprom_name[32];
@@ -395,6 +435,7 @@ struct msm_camera_sensor_slave_info {
 	struct msm_sensor_init_params sensor_init_params;
 };
 
+#endif
 struct sensorb_cfg_data {
 	int cfgtype;
 	union {
@@ -425,7 +466,9 @@ enum eeprom_cfg_type_t {
 	CFG_EEPROM_GET_CAL_DATA,
 	CFG_EEPROM_READ_CAL_DATA,
 	CFG_EEPROM_WRITE_DATA,
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	CFG_EEPROM_GET_MM_INFO,
+#endif
 };
 
 struct eeprom_get_t {
@@ -442,12 +485,14 @@ struct eeprom_write_t {
 	uint32_t num_bytes;
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 struct eeprom_get_mm_t {
 	uint32_t mm_support;
 	uint32_t mm_compression;
 	uint32_t mm_size;
 };
 
+#endif
 struct msm_eeprom_cfg_data {
 	enum eeprom_cfg_type_t cfgtype;
 	uint8_t is_supported;
@@ -456,7 +501,9 @@ struct msm_eeprom_cfg_data {
 		struct eeprom_get_t get_data;
 		struct eeprom_read_t read_data;
 		struct eeprom_write_t write_data;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 		struct eeprom_get_mm_t get_mm_data;
+#endif
 	} cfg;
 };
 
@@ -495,10 +542,16 @@ enum msm_actuator_cfg_type_t {
 	CFG_GET_ACTUATOR_INFO,
 	CFG_SET_ACTUATOR_INFO,
 	CFG_SET_DEFAULT_FOCUS,
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	CFG_MOVE_FOCUS,
+#endif
 	CFG_SET_POSITION,
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	CFG_ACTUATOR_POWERDOWN,
 	CFG_ACTUATOR_POWERUP,
+#else
+	CFG_MOVE_FOCUS,
+#endif
 };
 
 enum actuator_type {
@@ -516,18 +569,24 @@ enum msm_actuator_addr_type {
 	MSM_ACTUATOR_WORD_ADDR,
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 enum msm_actuator_i2c_operation {
 	MSM_ACT_WRITE = 0,
 	MSM_ACT_POLL,
 };
 
+#endif
 struct reg_settings_t {
 	uint16_t reg_addr;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	enum msm_actuator_addr_type addr_type;
+#endif
 	uint16_t reg_data;
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 	enum msm_actuator_data_type data_type;
 	enum msm_actuator_i2c_operation i2c_operation;
 	uint32_t delay;
+#endif
 };
 
 struct region_params_t {
@@ -600,6 +659,9 @@ enum af_camera_name {
 	ACTUATOR_MAIN_CAM_3,
 	ACTUATOR_MAIN_CAM_4,
 	ACTUATOR_MAIN_CAM_5,
+#ifdef CONFIG_SONY_FLAMINGO
+	ACTUATOR_MAIN_CAM_6,	
+#endif
 	ACTUATOR_WEB_CAM_0,
 	ACTUATOR_WEB_CAM_1,
 	ACTUATOR_WEB_CAM_2,
@@ -651,6 +713,7 @@ struct msm_camera_led_cfg_t {
 	uint32_t flash_current[2];
 };
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 /* sensor init structures and enums */
 enum msm_sensor_init_cfg_type_t {
 	CFG_SINIT_PROBE,
@@ -665,6 +728,7 @@ struct sensor_init_cfg_data {
 	} cfg;
 };
 
+#endif
 #define VIDIOC_MSM_SENSOR_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct sensorb_cfg_data)
 
@@ -674,11 +738,21 @@ struct sensor_init_cfg_data {
 #define VIDIOC_MSM_SENSOR_GET_SUBDEV_ID \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 3, uint32_t)
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define VIDIOC_MSM_CSIPHY_IO_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csiphy_cfg_data)
+#else
+#define VIDIOC_MSM_CSIPHY_IO_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csid_cfg_data)
+#endif
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define VIDIOC_MSM_CSID_IO_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct csid_cfg_data)
+#else
+#define VIDIOC_MSM_CSID_IO_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct csiphy_cfg_data)
+#endif
 
 #define VIDIOC_MSM_ACTUATOR_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 6, struct msm_actuator_cfg_data)
@@ -692,9 +766,11 @@ struct sensor_init_cfg_data {
 #define VIDIOC_MSM_SENSOR_GET_AF_STATUS \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 9, uint32_t)
 
+#ifndef CONFIG_MSMB_CAMERA_FLAMINGO
 #define VIDIOC_MSM_SENSOR_INIT_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct sensor_init_cfg_data)
 
+#endif
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
 
 #endif /* __LINUX_MSM_CAM_SENSOR_H */
