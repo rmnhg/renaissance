@@ -30,6 +30,10 @@
 #include <linux/regulator/onsemi-ncp6335d.h>
 #include <linux/regulator/qpnp-regulator.h>
 #include <linux/msm_tsens.h>
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+#include <linux/persistent_ram.h>
+#include <linux/memblock.h>
+#endif
 #include <asm/mach/map.h>
 #include <asm/hardware/gic.h>
 #include <asm/mach/arch.h>
@@ -58,6 +62,12 @@
 #include "pm.h"
 #include "modem_notifier.h"
 #include "spm-regulator.h"
+#ifdef CONFIG_KEXEC_HARDBOOT
+#include <asm/setup.h>
+#include <asm/memory.h>
+#include <linux/memblock.h>
+#define SONY_PERSISTENT_RAM_SIZE	(SZ_1M)
+#endif
 
 static struct memtype_reserve msm8226_reserve_table[] __initdata = {
 	[MEMTYPE_SMI] = {
@@ -69,6 +79,60 @@ static struct memtype_reserve msm8226_reserve_table[] __initdata = {
 		.flags	=	MEMTYPE_FLAGS_1M_ALIGN,
 	},
 };
+
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+static struct persistent_ram_descriptor desc = {
+        .name = "ram_console",
+};
+
+static struct persistent_ram ram = {
+        .descs = &desc,
+        .num_descs = 1,
+};
+
+void __init ram_console_debug_reserve(unsigned long ram_console_size)
+{
+        int ret;
+
+        ram.start = memblock_end_of_DRAM() - ram_console_size;
+        ram.size = ram_console_size;
+        ram.descs->size = ram_console_size;
+        INIT_LIST_HEAD(&ram.node);
+
+        ret = persistent_ram_early_init(&ram);
+        if (ret) {
+                pr_err("%s:ram console persistent_ram_early_init failed\n",__func__);
+                goto fail;
+        }
+
+        return;
+
+fail:
+        pr_err("Failed to reserve memory block for ram console\n");
+}
+
+static struct resource ram_console_resources[] = {
+        {
+                .flags = IORESOURCE_MEM,
+        },
+};
+
+static struct platform_device ram_console_device = {
+        .name           = "ram_console",
+        .id             = -1,
+        .num_resources  = ARRAY_SIZE(ram_console_resources),
+        .resource       = ram_console_resources,
+};
+
+void __init ram_console_debug_init(void)
+{
+        int err;
+        err = platform_device_register(&ram_console_device);
+        if (err)
+                pr_err("%s: ram console registration failed (%d)!\n",
+                        __func__, err);
+}
+#endif
 
 static int msm8226_paddr_to_memtype(unsigned int paddr)
 {
@@ -113,9 +177,32 @@ static void __init msm8226_early_memory(void)
 
 static void __init msm8226_reserve(void)
 {
+#ifdef CONFIG_KEXEC_HARDBOOT
+	// Reserve space for hardboot page - just after ram_console,
+	// at the start of second memory bank
+	int ret;
+	phys_addr_t start;
+	struct membank* bank;
+
+	if (meminfo.nr_banks < 2) {
+		pr_err("%s: not enough membank\n", __func__);
+		return;
+	}
+
+	bank = &meminfo.bank[1];
+	start = bank->start + SZ_1M + SONY_PERSISTENT_RAM_SIZE;
+	ret = memblock_remove(start, SZ_1M);
+	if(!ret)
+		pr_info("Hardboot page reserved at 0x%X\n", start);
+	else
+		pr_err("Failed to reserve space for hardboot page at 0x%X!\n", start);
+#endif
 	reserve_info = &msm8226_reserve_info;
 	of_scan_flat_dt(dt_scan_for_memory_reserve, msm8226_reserve_table);
 	msm_reserve();
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+	ram_console_debug_reserve(SZ_1M *2);
+#endif
 }
 
 /*
@@ -146,6 +233,9 @@ void __init msm8226_add_drivers(void)
 	cpr_regulator_init();
 	tsens_tm_init_driver();
 	msm_thermal_device_init();
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+	ram_console_debug_init();
+#endif
 }
 
 void __init msm8226_init(void)
