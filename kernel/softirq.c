@@ -214,7 +214,7 @@ asmlinkage void __do_softirq(void)
 {
 	struct softirq_action *h;
 	__u32 pending;
-	int max_restart = MAX_SOFTIRQ_RESTART;
+	unsigned long end = jiffies + MAX_SOFTIRQ_TIME;
 	int cpu;
 	int max_restart = MAX_SOFTIRQ_RESTART;
 
@@ -267,8 +267,8 @@ restart:
 		    --max_restart)
 			goto restart;
 
-	if (pending)
 		wakeup_softirqd();
+	}
 
 	lockdep_softirq_exit();
 
